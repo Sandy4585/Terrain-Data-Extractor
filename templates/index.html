@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload Files</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-image: url("{{ url_for('static', filename='images/Background image.jpg') }}");
+            background-size: cover;
+            background-repeat: no-repeat;
+            color: #ffffff; /* White text */
+        }
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: rgba(0, 176, 240, 0.8); /* Semi-transparent blue background */
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+        h1 {
+            text-align: center;
+            color: #ffffff; /* White text */
+        }
+        form {
+            background-color: rgba(255, 255, 255, 0.9); /* Semi-transparent white background */
+            padding: 20px;
+            border-radius: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 10px;
+            color: #000000; /* Black text */
+        }
+        input[type=file] {
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #cccccc; /* Light gray border */
+            border-radius: 5px;
+            width: 100%;
+            background-color: #ffffff; /* White background */
+        }
+        button[type=submit] {
+            padding: 10px 20px;
+            background-color: #00B0F0; /* Blue button background */
+            color: #ffffff; /* White text */
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .logo {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+        .logo img {
+            width: 150px; /* Adjust size as needed */
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Terrain Data Generator</h1>
+        <form action="/upload" method="POST" enctype="multipart/form-data">
+            <label for="dem_file">Upload DEM(Raster) File:</label>
+            <input type="file" id="dem_file" name="dem_file" accept=".tif,.tiff"><br><br>
+            
+            <label for="kml_file">Upload KML File:</label>
+            <input type="file" id="kml_file" name="kml_file" accept=".kml"><br><br>
+
+            <button type="submit">Process Files</button>
+        </form>
+    </div>
+
+    <div class="logo">
+        <img src="{{ url_for('static', filename='images/CIR.jpg') }}" alt="CIR Logo">
+    </div>
+</body>
+</html>
