@@ -3,80 +3,181 @@
 <head>
     <meta charset="UTF-8">
     <title>TERRAIN DATA GENERATOR</title>
+    <link href="https://fonts.googleapis.com/css2?family=Avenir+Next+LT+Pro:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background-image: url("{{ url_for('static', filename='images/Background image.jpg') }}");
+            font-family: 'Avenir Next LT Pro', sans-serif;
+            background-image: url("{{ url_for('static', filename='images/terrain_background.png') }}");
             background-size: cover;
             background-repeat: no-repeat;
-            color: #ffffff; /* White text */
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
         .container {
             max-width: 600px;
-            margin: 50px auto;
+            margin: auto;
             padding: 20px;
-            background-color: rgba(0, 176, 240, 0.8); /* Semi-transparent blue background */
+            background-color: rgba(0, 176, 240, 0.9);
             border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+            margin-top: 10vh;
+            position: relative;
         }
         h1 {
             text-align: center;
-            color: #ffffff; /* White text */
+            color: #ffffff;
         }
         form {
-            background-color: rgba(255, 255, 255, 0.9); /* Semi-transparent white background */
+            background-color: rgba(255, 255, 255, 0.9);
             padding: 20px;
             border-radius: 10px;
         }
         label {
             display: block;
             margin-bottom: 10px;
-            color: #000000; /* Black text */
+            color: #000000;
+            font-weight: bold;
         }
         input[type=file] {
             margin-bottom: 15px;
             padding: 10px;
-            border: 1px solid #cccccc; /* Light gray border */
+            border: 1px solid #cccccc;
             border-radius: 5px;
             width: 100%;
-            background-color: #ffffff; /* White background */
+            background-color: #ffffff;
         }
         button[type=submit] {
             padding: 10px 20px;
-            background-color: #00B0F0; /* Blue button background */
-            color: #ffffff; /* White text */
+            background-color: #00B0F0;
+            color: #ffffff;
             border: none;
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button[type=submit]:hover {
+            background-color: #008CBA;
+        }
+        .footer {
+            margin-top: auto;
+            text-align: center;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #ffffff;
+            font-size: 14px;
         }
         .logo {
             position: absolute;
-            top: 20px; 
+            top: 20px;
             right: 20px;
         }
         .logo img {
-            width: 150px; /* Adjust size as needed */
+            width: 150px;
             height: auto;
+        }
+        .progress {
+            display: none;
+            margin-top: 20px;
+            height: 20px;
+            background-color: #f3f3f3;
+            border-radius: 5px;
+            overflow: hidden;
+            position: relative;
+        }
+        .progress-bar {
+            height: 100%;
+            width: 0;
+            background-color: #4caf50;
+            text-align: center;
+            color: #ffffff;
+            white-space: nowrap;
+            transition: width 0.4s ease;
+        }
+        .message {
+            text-align: center;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
+    <div class="header">
+        Terrain Data Generator
+    </div>
     <div class="container">
-        <h1>Terrain Data Generator</h1>
-        <form action="/upload" method="POST" enctype="multipart/form-data">
-            <label for="dem_file">Upload DEM(Raster) File:</label>
-            <input type="file" id="dem_file" name="dem_file" accept=".tif,.tiff"><br><br>
+        <h1>Upload Your Files</h1>
+        <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+            <label for="dem_file">Upload DEM (Raster) File:</label>
+            <input type="file" id="dem_file" name="dem_file" accept=".tif,.tiff"><br>
             
             <label for="kml_file">Upload KML File:</label>
-            <input type="file" id="kml_file" name="kml_file" accept=".kml"><br><br>
+            <input type="file" id="kml_file" name="kml_file" accept=".kml"><br>
 
             <button type="submit">Process Files</button>
         </form>
+        <div class="progress">
+            <div class="progress-bar" id="progress-bar">Bringing the terrain to you...</div>
+        </div>
+        <div class="message" id="message"></div>
     </div>
-
+    <div class="footer">
+        &copy; 2024 Terrain Data Generator. All rights reserved.
+    </div>
     <div class="logo">
         <img src="{{ url_for('static', filename='images/CIR.jpg') }}" alt="CIR Logo">
     </div>
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            var formData = new FormData(this);
+            var xhr = new XMLHttpRequest();
+            var progressBar = document.getElementById('progress-bar');
+            var progressContainer = document.querySelector('.progress');
+            var message = document.getElementById('message');
+
+            xhr.open('POST', '/upload', true);
+
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    var percentComplete = (e.loaded / e.total) * 100;
+                    progressBar.style.width = percentComplete + '%';
+                    if (percentComplete < 100) {
+                        progressContainer.style.display = 'block';
+                    }
+                }
+            });
+
+            xhr.addEventListener('load', function() {
+                if (xhr.status === 200) {
+                    message.textContent = 'Files processed successfully!';
+                    message.style.color = 'green';
+                    // Trigger file download
+                    var blob = new Blob([xhr.response], { type: 'application/zip' });
+                    var link = document.createElement('a');
+                    link.href = window.URL.createObjectURL(blob);
+                    link.download = 'output.zip';
+                    link.click();
+                } else {
+                    message.textContent = 'Error processing files.';
+                    message.style.color = 'red';
+                }
+                progressContainer.style.display = 'none';
+            });
+
+            xhr.send(formData);
+        });
+    </script>
 </body>
 </html>

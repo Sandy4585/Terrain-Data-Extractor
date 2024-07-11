@@ -16,7 +16,9 @@ def clip_raster(dem_path, kml_path):
     logging.debug("Clipping the raster with dem_path: %s and kml_path: %s", dem_path, kml_path)
     tmp_dir = create_temp_dir()
     tmp_output_path = os.path.join(tmp_dir, 'tmp_clip.tif')
-    subprocess.run(['gdalwarp', '-cutline', kml_path, '-crop_to_cutline', dem_path, tmp_output_path])
+    if os.path.exists(tmp_output_path):
+        os.remove(tmp_output_path)
+    subprocess.run(['gdalwarp', '-cutline', kml_path, '-crop_to_cutline', dem_path, tmp_output_path], check=True)
     with open(tmp_output_path, 'rb') as f:
         clipped_data = f.read()
     logging.debug("Clipped raster data length: %d bytes", len(clipped_data))
@@ -86,7 +88,7 @@ def generate_contours(clipped_dem_feet_data, tmp_dir, interval=1):
 def convert_shapefile_to_dxf(shapefile_data, tmp_dir):
     tmp_input_path = os.path.join(tmp_dir, 'tmp_contours.shp')
     tmp_output_path = os.path.join(tmp_dir, 'tmp_contours.dxf')
-    subprocess.run(['ogr2ogr', '-f', 'DXF', '-zfield', 'elev', tmp_output_path, tmp_input_path])
+    subprocess.run(['ogr2ogr', '-f', 'DXF', '-zfield', 'elev', tmp_output_path, tmp_input_path], check=True)
     with open(tmp_output_path, 'rb') as f:
         dxf_data = f.read()
     logging.debug("Converted DXF data length: %d bytes", len(dxf_data))
@@ -112,7 +114,7 @@ def raster_to_points(clipped_dem_data, tmp_dir):
 
     with open(tmp_output_path, 'rb') as f:
         points_data = f.read()
-    logging.debug("Generated points data length: %d bytes", len(points_data))
+    logging.debug("Generated points data length: %d bytes")
     return points_data, tmp_dir
 
 def create_temp_dir():
@@ -127,48 +129,49 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload():
     logging.debug("Upload route accessed")
-    # Get uploaded files
-    dem_file = request.files['dem_file']
-    kml_file = request.files['kml_file']
+    try:
+        # Get uploaded files
+        dem_file = request.files['dem_file']
+        kml_file = request.files['kml_file']
 
-    # Save uploaded files to a temporary directory
-    temp_dir = create_temp_dir()
-    dem_path = os.path.join(temp_dir, dem_file.filename)
-    kml_path = os.path.join(temp_dir, kml_file.filename)
-    dem_file.save(dem_path)
-    kml_file.save(kml_path)
+        # Save uploaded files to a temporary directory
+        temp_dir = create_temp_dir()
+        dem_path = os.path.join(temp_dir, dem_file.filename)
+        kml_path = os.path.join(temp_dir, kml_file.filename)
+        dem_file.save(dem_path)
+        kml_file.save(kml_path)
 
-    # Process the uploaded files
-    clipped_dem_data, tmp_dir = clip_raster(dem_path, kml_path)
-    clipped_dem_feet_data, tmp_dir = transform_to_feet(clipped_dem_data, tmp_dir)
-    contour_shp_data, tmp_dir = generate_contours(clipped_dem_feet_data, tmp_dir)
-    dxf_data, tmp_dir = convert_shapefile_to_dxf(contour_shp_data, tmp_dir)
-    csv_data, tmp_dir = raster_to_points(clipped_dem_data, tmp_dir)
+        # Process the uploaded files
+        clipped_dem_data, tmp_dir = clip_raster(dem_path, kml_path)
+        clipped_dem_feet_data, tmp_dir = transform_to_feet(clipped_dem_data, tmp_dir)
+        contour_shp_data, tmp_dir = generate_contours(clipped_dem_feet_data, tmp_dir)
+        dxf_data, tmp_dir = convert_shapefile_to_dxf(contour_shp_data, tmp_dir)
+        csv_data, tmp_dir = raster_to_points(clipped_dem_data, tmp_dir)
 
-    # Create an in-memory zip file
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zipf:
-        zipf.writestr("clipped_dem.tif", clipped_dem_data)
-        zipf.writestr("clipped_dem_feet.tif", clipped_dem_feet_data)
-        zipf.writestr("contours-shape-file.shp", contour_shp_data)
-        zipf.writestr("contours.dxf", dxf_data)
-        zipf.writestr("pvsyst_shading_file.csv", csv_data)
+        # Create an in-memory zip file
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zipf:
+            zipf.writestr("clipped_dem.tif", clipped_dem_data)
+            zipf.writestr("clipped_dem_feet.tif", clipped_dem_feet_data)
+            zipf.writestr("contours.shp", contour_shp_data)
+            zipf.writestr("contours.dxf", dxf_data)
+            zipf.writestr("pvsyst_shading_file.csv", csv_data)
 
-    zip_buffer.seek(0)
+        zip_buffer.seek(0)
 
-    # Clean up temporary files
-    for file in os.listdir(temp_dir):
-        file_path = os.path.join(temp_dir, file)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-    os.rmdir(temp_dir)
+        # Clean up temporary files
+        for file in os.listdir(temp_dir):
+            file_path = os.path.join(temp_dir, file)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        os.rmdir(temp_dir)
 
-    # Seek back to the beginning of the buffer
-    zip_buffer.seek(0)
-
-    # Return the zip file as a response
-    logging.debug("Returning the generated zip file")
-    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='output.zip')
+        # Return the zip file as a response
+        logging.debug("Returning the generated zip file")
+        return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='output.zip')
+    except Exception as e:
+        logging.error("Error in upload route: %s", e)
+        return "An error occurred during processing", 500
 
 if __name__ == "__main__":
     app.run(debug=True)
