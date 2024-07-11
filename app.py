@@ -5,24 +5,42 @@ from osgeo import gdal, ogr, osr
 import zipfile
 import tempfile
 import io
+import numpy as np
+import logging
 
 app = Flask(__name__)
 
+logging.basicConfig(level=logging.DEBUG)
+
 def clip_raster(dem_path, kml_path):
+    logging.debug("Clipping the raster with dem_path: %s and kml_path: %s", dem_path, kml_path)
     tmp_dir = create_temp_dir()
     tmp_output_path = os.path.join(tmp_dir, 'tmp_clip.tif')
     subprocess.run(['gdalwarp', '-cutline', kml_path, '-crop_to_cutline', dem_path, tmp_output_path])
     with open(tmp_output_path, 'rb') as f:
-        return f.read(), tmp_dir
+        clipped_data = f.read()
+    logging.debug("Clipped raster data length: %d bytes", len(clipped_data))
+    return clipped_data, tmp_dir
 
 def transform_to_feet(clipped_dem_data, tmp_dir):
+    logging.debug("Transforming clipped DEM data to feet")
     tmp_input_path = os.path.join(tmp_dir, 'tmp_clip.tif')
     with open(tmp_input_path, 'wb') as tmp_input:
         tmp_input.write(clipped_dem_data)
     input_ds = gdal.Open(tmp_input_path, gdal.GA_Update)
     dem_band = input_ds.GetRasterBand(1)
     dem_array = dem_band.ReadAsArray()
+    
+    # Mask the no-data values
+    nodata_value = dem_band.GetNoDataValue()
+    dem_array = np.ma.masked_equal(dem_array, nodata_value)
+    logging.debug("Original DEM array stats - min: %f, max: %f", dem_array.min(), dem_array.max())
+    
     dem_array_feet = dem_array * 3.28084  # Conversion factor from meters to feet
+    logging.debug("Converted DEM array stats - min: %f, max: %f", dem_array_feet.min(), dem_array_feet.max())
+    
+    # Unmask the no-data values
+    dem_array_feet = dem_array_feet.filled(nodata_value)
     
     tmp_output_path = os.path.join(tmp_dir, 'tmp_feet.tif')
     driver = gdal.GetDriverByName('GTiff')
@@ -32,13 +50,15 @@ def transform_to_feet(clipped_dem_data, tmp_dir):
     
     out_band = out_ds.GetRasterBand(1)
     out_band.WriteArray(dem_array_feet)
-    out_band.SetNoDataValue(dem_band.GetNoDataValue())
+    out_band.SetNoDataValue(nodata_value)
     
     out_ds.FlushCache()
     out_ds = None  # Close the output dataset
     
     with open(tmp_output_path, 'rb') as f:
-        return f.read(), tmp_dir
+        transformed_data = f.read()
+    logging.debug("Transformed DEM data length: %d bytes", len(transformed_data))
+    return transformed_data, tmp_dir
 
 def generate_contours(clipped_dem_feet_data, tmp_dir, interval=1):
     tmp_input_path = os.path.join(tmp_dir, 'tmp_feet.tif')
@@ -59,14 +79,18 @@ def generate_contours(clipped_dem_feet_data, tmp_dir, interval=1):
     contour_ds = None  # Close the contour dataset
 
     with open(tmp_output_path, 'rb') as f:
-        return f.read(), tmp_dir
+        contour_data = f.read()
+    logging.debug("Generated contour data length: %d bytes", len(contour_data))
+    return contour_data, tmp_dir
 
 def convert_shapefile_to_dxf(shapefile_data, tmp_dir):
     tmp_input_path = os.path.join(tmp_dir, 'tmp_contours.shp')
     tmp_output_path = os.path.join(tmp_dir, 'tmp_contours.dxf')
     subprocess.run(['ogr2ogr', '-f', 'DXF', '-zfield', 'elev', tmp_output_path, tmp_input_path])
     with open(tmp_output_path, 'rb') as f:
-        return f.read(), tmp_dir
+        dxf_data = f.read()
+    logging.debug("Converted DXF data length: %d bytes", len(dxf_data))
+    return dxf_data, tmp_dir
 
 def raster_to_points(clipped_dem_data, tmp_dir):
     tmp_input_path = os.path.join(tmp_dir, 'tmp_clip.tif')
@@ -87,21 +111,22 @@ def raster_to_points(clipped_dem_data, tmp_dir):
                     tmp_output.write(f"{px},{py},{value}\n")
 
     with open(tmp_output_path, 'rb') as f:
-        return f.read(), tmp_dir
+        points_data = f.read()
+    logging.debug("Generated points data length: %d bytes", len(points_data))
+    return points_data, tmp_dir
 
 def create_temp_dir():
     temp_dir = os.path.join(tempfile.gettempdir(), 'terrain_processing_temp')
     os.makedirs(temp_dir, exist_ok=True)
     return temp_dir
 
-# Define a route for the index page with file upload form
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Define a route to handle file upload and processing
 @app.route('/upload', methods=['POST'])
 def upload():
+    logging.debug("Upload route accessed")
     # Get uploaded files
     dem_file = request.files['dem_file']
     kml_file = request.files['kml_file']
@@ -125,7 +150,7 @@ def upload():
     with zipfile.ZipFile(zip_buffer, 'w') as zipf:
         zipf.writestr("clipped_dem.tif", clipped_dem_data)
         zipf.writestr("clipped_dem_feet.tif", clipped_dem_feet_data)
-        zipf.writestr("contours.shp", contour_shp_data)
+        zipf.writestr("contours-shape-file.shp", contour_shp_data)
         zipf.writestr("contours.dxf", dxf_data)
         zipf.writestr("pvsyst_shading_file.csv", csv_data)
 
@@ -142,6 +167,7 @@ def upload():
     zip_buffer.seek(0)
 
     # Return the zip file as a response
+    logging.debug("Returning the generated zip file")
     return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='output.zip')
 
 if __name__ == "__main__":
