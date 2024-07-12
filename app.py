@@ -169,7 +169,8 @@ def upload():
         os.rmdir(temp_dir)
 
         logging.debug("Returning the generated zip file")
-        return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='output.zip')
+        kml_file_name = os.path.splitext(kml_file.filename)[0]
+        return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=f'{kml_file_name}.zip')
 
     except Exception as e:
         logging.error("Error in upload route: %s", e)

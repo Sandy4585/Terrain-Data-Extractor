@@ -206,11 +206,13 @@
                 if (xhr.status === 200) {
                     message.textContent = 'Files processed successfully!';
                     message.style.color = 'green';
-                    // Trigger file download
+                    // Trigger file download with KML file name
                     var blob = xhr.response;
+                    var kmlFileName = document.getElementById('kml_file').files[0].name;
+                    var zipFileName = kmlFileName.substring(0, kmlFileName.lastIndexOf('.')) + '.zip';
                     var link = document.createElement('a');
                     link.href = window.URL.createObjectURL(blob);
-                    link.download = 'output.zip';
+                    link.download = zipFileName;
                     link.click();
                 } else {
                     message.textContent = 'Error processing files.';
