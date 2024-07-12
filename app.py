@@ -8,7 +8,7 @@ import io
 import numpy as np
 import logging
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -16,8 +16,6 @@ def clip_raster(dem_path, kml_path):
     logging.debug("Clipping the raster with dem_path: %s and kml_path: %s", dem_path, kml_path)
     tmp_dir = create_temp_dir()
     tmp_output_path = os.path.join(tmp_dir, 'tmp_clip.tif')
-    if os.path.exists(tmp_output_path):
-        os.remove(tmp_output_path)
     subprocess.run(['gdalwarp', '-cutline', kml_path, '-crop_to_cutline', dem_path, tmp_output_path], check=True)
     with open(tmp_output_path, 'rb') as f:
         clipped_data = f.read()
@@ -114,7 +112,7 @@ def raster_to_points(clipped_dem_data, tmp_dir):
 
     with open(tmp_output_path, 'rb') as f:
         points_data = f.read()
-    logging.debug("Generated points data length: %d bytes")
+    logging.debug("Generated points data length: %d bytes", len(points_data))
     return points_data, tmp_dir
 
 def create_temp_dir():
@@ -129,19 +127,19 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload():
     logging.debug("Upload route accessed")
+    # Get uploaded files
+    dem_file = request.files['dem_file']
+    kml_file = request.files['kml_file']
+
+    # Save uploaded files to a temporary directory
+    temp_dir = create_temp_dir()
+    dem_path = os.path.join(temp_dir, dem_file.filename)
+    kml_path = os.path.join(temp_dir, kml_file.filename)
+    dem_file.save(dem_path)
+    kml_file.save(kml_path)
+
+    # Process the uploaded files
     try:
-        # Get uploaded files
-        dem_file = request.files['dem_file']
-        kml_file = request.files['kml_file']
-
-        # Save uploaded files to a temporary directory
-        temp_dir = create_temp_dir()
-        dem_path = os.path.join(temp_dir, dem_file.filename)
-        kml_path = os.path.join(temp_dir, kml_file.filename)
-        dem_file.save(dem_path)
-        kml_file.save(kml_path)
-
-        # Process the uploaded files
         clipped_dem_data, tmp_dir = clip_raster(dem_path, kml_path)
         clipped_dem_feet_data, tmp_dir = transform_to_feet(clipped_dem_data, tmp_dir)
         contour_shp_data, tmp_dir = generate_contours(clipped_dem_feet_data, tmp_dir)
@@ -151,12 +149,16 @@ def upload():
         # Create an in-memory zip file
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w') as zipf:
+            logging.debug("Adding clipped_dem.tif to zip")
             zipf.writestr("clipped_dem.tif", clipped_dem_data)
+            logging.debug("Adding clipped_dem_feet.tif to zip")
             zipf.writestr("clipped_dem_feet.tif", clipped_dem_feet_data)
-            zipf.writestr("contours.shp", contour_shp_data)
+            logging.debug("Adding contours-shape-file.shp to zip")
+            zipf.writestr("contours-shape-file.shp", contour_shp_data)
+            logging.debug("Adding contours.dxf to zip")
             zipf.writestr("contours.dxf", dxf_data)
+            logging.debug("Adding pvsyst_shading_file.csv to zip")
             zipf.writestr("pvsyst_shading_file.csv", csv_data)
-
         zip_buffer.seek(0)
 
         # Clean up temporary files
@@ -166,9 +168,9 @@ def upload():
                 os.remove(file_path)
         os.rmdir(temp_dir)
 
-        # Return the zip file as a response
         logging.debug("Returning the generated zip file")
         return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='output.zip')
+
     except Exception as e:
         logging.error("Error in upload route: %s", e)
         return "An error occurred during processing", 500
