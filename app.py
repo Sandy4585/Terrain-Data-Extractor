@@ -7,20 +7,36 @@ import tempfile
 import io
 import numpy as np
 import logging
+import ezdxf
+import csv
+from scipy.spatial import Delaunay  # Add this line
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 logging.basicConfig(level=logging.DEBUG)
 
+M_TO_FT = 3.28084  # Conversion factor from meters to feet
+
+def create_temp_dir():
+    temp_dir = os.path.join(tempfile.gettempdir(), 'terrain_processing_temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    return temp_dir
+
 def clip_raster(dem_path, kml_path):
     logging.debug("Clipping the raster with dem_path: %s and kml_path: %s", dem_path, kml_path)
     tmp_dir = create_temp_dir()
     tmp_output_path = os.path.join(tmp_dir, 'tmp_clip.tif')
+    
+    # Delete the existing file if it exists
+    if os.path.exists(tmp_output_path):
+        os.remove(tmp_output_path)
+    
     subprocess.run(['gdalwarp', '-cutline', kml_path, '-crop_to_cutline', dem_path, tmp_output_path], check=True)
     with open(tmp_output_path, 'rb') as f:
         clipped_data = f.read()
     logging.debug("Clipped raster data length: %d bytes", len(clipped_data))
     return clipped_data, tmp_dir
+
 
 def transform_to_feet(clipped_dem_data, tmp_dir):
     logging.debug("Transforming clipped DEM data to feet")
@@ -36,7 +52,7 @@ def transform_to_feet(clipped_dem_data, tmp_dir):
     dem_array = np.ma.masked_equal(dem_array, nodata_value)
     logging.debug("Original DEM array stats - min: %f, max: %f", dem_array.min(), dem_array.max())
     
-    dem_array_feet = dem_array * 3.28084  # Conversion factor from meters to feet
+    dem_array_feet = dem_array * M_TO_FT  # Conversion factor from meters to feet
     logging.debug("Converted DEM array stats - min: %f, max: %f", dem_array_feet.min(), dem_array_feet.max())
     
     # Unmask the no-data values
@@ -113,12 +129,78 @@ def raster_to_points(clipped_dem_data, tmp_dir):
     with open(tmp_output_path, 'rb') as f:
         points_data = f.read()
     logging.debug("Generated points data length: %d bytes", len(points_data))
-    return points_data, tmp_dir
+    return points_data, tmp_output_path, tmp_dir
 
-def create_temp_dir():
-    temp_dir = os.path.join(tempfile.gettempdir(), 'terrain_processing_temp')
-    os.makedirs(temp_dir, exist_ok=True)
-    return temp_dir
+# New functions for DXF generation with mesh and color
+def read_csv(file_path):
+    points_meters = []
+    points_feet = []
+    with open(file_path, newline='') as csvfile:
+        csvreader = csv.DictReader(csvfile)
+        for row in csvreader:
+            x = float(row['X'])
+            y = float(row['Y'])
+            z_meters = float(row['Z'])
+            z_feet = z_meters * M_TO_FT
+            points_meters.append((x, y, z_meters))
+            points_feet.append((x, y, z_feet))
+    return points_meters, points_feet
+
+def create_dxf(points, output_file):
+    doc = ezdxf.new(dxfversion='R2010')
+    modelspace = doc.modelspace()
+    for point in points:
+        modelspace.add_point(point, dxfattribs={'layer': '3D Points'})
+    doc.saveas(output_file)
+
+def create_mesh(points):
+    coords = np.array([(x, y) for x, y, z in points])
+    tri = Delaunay(coords)
+    return tri.simplices
+
+def calculate_slope(p1, p2, p3):
+    a = np.linalg.norm(np.array(p2) - np.array(p1))
+    b = np.linalg.norm(np.array(p3) - np.array(p2))
+    c = np.linalg.norm(np.array(p1) - np.array(p3))
+    s = (a + b + c) / 2
+    area = np.sqrt(s * (s - a) * (s - b) * (s - c))
+    height = 2 * area / a
+    slope = np.degrees(np.arctan(height / a))
+    return slope
+
+def slope_to_color(slope):
+    if slope > 30:
+        return 1  # Red
+    elif slope > 25:
+        return 2  # Yellow
+    elif slope > 20:
+        return 3  # Green
+    elif slope > 15:
+        return 4  # Cyan
+    elif slope > 10:
+        return 5  # Blue
+    elif slope > 5:
+        return 6  # Magenta
+    else:
+        return 7  # White
+
+def create_dxf_mesh(points, simplices, output_file):
+    doc = ezdxf.new(dxfversion='R2010')
+    modelspace = doc.modelspace()
+    for simplex in simplices:
+        pts = [points[i] for i in simplex]
+        slope = calculate_slope(pts[0], pts[1], pts[2])
+        color = slope_to_color(slope)
+        
+        
+        face = modelspace.add_3dface([
+            (pts[0][0], pts[0][1], pts[0][2]),
+            (pts[1][0], pts[1][1], pts[1][2]),
+            (pts[2][0], pts[2][1], pts[2][2]),
+            (pts[2][0], pts[2][1], pts[2][2])  # Duplicate the last point for triangles
+        ], dxfattribs={'layer': '3D Mesh', 'color': color})
+        face.dxf.invisible_edges = 1 + 2 + 4  # Make all edges invisible
+    doc.saveas(output_file)
 
 @app.route('/')
 def index():
@@ -144,7 +226,27 @@ def upload():
         clipped_dem_feet_data, tmp_dir = transform_to_feet(clipped_dem_data, tmp_dir)
         contour_shp_data, tmp_dir = generate_contours(clipped_dem_feet_data, tmp_dir)
         dxf_data, tmp_dir = convert_shapefile_to_dxf(contour_shp_data, tmp_dir)
-        csv_data, tmp_dir = raster_to_points(clipped_dem_data, tmp_dir)
+        points_data, points_csv_path, tmp_dir = raster_to_points(clipped_dem_data, tmp_dir)
+
+        # Generate 3D points DXF in meters and feet
+        points_meters, points_feet = read_csv(points_csv_path)
+        dxf_file_meters = os.path.join(tmp_dir, 'output_meters.dxf')
+        dxf_file_feet = os.path.join(tmp_dir, 'output_feet.dxf')
+        create_dxf(points_meters, dxf_file_meters)
+        create_dxf(points_feet, dxf_file_feet)
+
+        # Generate 3D mesh DXF in feet
+        simplices = create_mesh(points_feet)
+        dxf_file_feet_mesh = os.path.join(tmp_dir, 'output_feet_mesh.dxf')
+        create_dxf_mesh(points_feet, simplices, dxf_file_feet_mesh)
+
+        # Read generated DXF files
+        with open(dxf_file_meters, 'rb') as f:
+            dxf_meters_data = f.read()
+        with open(dxf_file_feet, 'rb') as f:
+            dxf_feet_data = f.read()
+        with open(dxf_file_feet_mesh, 'rb') as f:
+            dxf_feet_mesh_data = f.read()
 
         # Create an in-memory zip file
         zip_buffer = io.BytesIO()
@@ -158,7 +260,13 @@ def upload():
             logging.debug("Adding contours.dxf to zip")
             zipf.writestr("contours.dxf", dxf_data)
             logging.debug("Adding pvsyst_shading_file.csv to zip")
-            zipf.writestr("pvsyst_shading_file.csv", csv_data)
+            zipf.writestr("pvsyst_shading_file.csv", points_data)
+            logging.debug("Adding output_meters.dxf to zip")
+            zipf.writestr("output_meters.dxf", dxf_meters_data)
+            logging.debug("Adding output_feet.dxf to zip")
+            zipf.writestr("output_feet.dxf", dxf_feet_data)
+            logging.debug("Adding output_feet_mesh.dxf to zip")
+            zipf.writestr("output_feet_mesh.dxf", dxf_feet_mesh_data)
         zip_buffer.seek(0)
 
         # Clean up temporary files
