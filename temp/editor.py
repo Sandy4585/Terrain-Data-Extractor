@@ -29,17 +29,11 @@ def clip_raster(dem_path, kml_path):
     logging.debug("Clipping the raster with dem_path: %s and kml_path: %s", dem_path, kml_path)
     tmp_dir = create_temp_dir()
     tmp_output_path = os.path.join(tmp_dir, f'{get_first_word(kml_path)}_clipped_dem.tif')
-    
-    # Delete the existing file if it exists
-    if os.path.exists(tmp_output_path):
-        os.remove(tmp_output_path)
-    
     subprocess.run(['gdalwarp', '-cutline', kml_path, '-crop_to_cutline', dem_path, tmp_output_path], check=True)
     with open(tmp_output_path, 'rb') as f:
         clipped_data = f.read()
     logging.debug("Clipped raster data length: %d bytes", len(clipped_data))
     return clipped_data, tmp_dir
-
 
 def transform_to_feet(clipped_dem_data, tmp_dir, kml_name):
     logging.debug("Transforming clipped DEM data to feet")

@@ -22,13 +22,10 @@ def create_temp_dir():
     os.makedirs(temp_dir, exist_ok=True)
     return temp_dir
 
-def get_first_word(filename):
-    return os.path.splitext(os.path.basename(filename))[0].split('_')[0]
-
 def clip_raster(dem_path, kml_path):
     logging.debug("Clipping the raster with dem_path: %s and kml_path: %s", dem_path, kml_path)
     tmp_dir = create_temp_dir()
-    tmp_output_path = os.path.join(tmp_dir, f'{get_first_word(kml_path)}_clipped_dem.tif')
+    tmp_output_path = os.path.join(tmp_dir, 'tmp_clip.tif')
     
     # Delete the existing file if it exists
     if os.path.exists(tmp_output_path):
@@ -41,9 +38,9 @@ def clip_raster(dem_path, kml_path):
     return clipped_data, tmp_dir
 
 
-def transform_to_feet(clipped_dem_data, tmp_dir, kml_name):
+def transform_to_feet(clipped_dem_data, tmp_dir):
     logging.debug("Transforming clipped DEM data to feet")
-    tmp_input_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_clipped_dem.tif')
+    tmp_input_path = os.path.join(tmp_dir, 'tmp_clip.tif')
     with open(tmp_input_path, 'wb') as tmp_input:
         tmp_input.write(clipped_dem_data)
     input_ds = gdal.Open(tmp_input_path, gdal.GA_Update)
@@ -61,7 +58,7 @@ def transform_to_feet(clipped_dem_data, tmp_dir, kml_name):
     # Unmask the no-data values
     dem_array_feet = dem_array_feet.filled(nodata_value)
     
-    tmp_output_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_clipped_dem(feet).tif')
+    tmp_output_path = os.path.join(tmp_dir, 'tmp_feet.tif')
     driver = gdal.GetDriverByName('GTiff')
     out_ds = driver.Create(tmp_output_path, input_ds.RasterXSize, input_ds.RasterYSize, 1, gdal.GDT_Float32)
     out_ds.SetGeoTransform(input_ds.GetGeoTransform())
@@ -79,14 +76,14 @@ def transform_to_feet(clipped_dem_data, tmp_dir, kml_name):
     logging.debug("Transformed DEM data length: %d bytes", len(transformed_data))
     return transformed_data, tmp_dir
 
-def generate_contours(clipped_dem_feet_data, tmp_dir, kml_name, interval=1):
-    tmp_input_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_clipped_dem(feet).tif')
+def generate_contours(clipped_dem_feet_data, tmp_dir, interval=1):
+    tmp_input_path = os.path.join(tmp_dir, 'tmp_feet.tif')
     input_ds = gdal.Open(tmp_input_path, gdal.GA_Update)
     raster_band = input_ds.GetRasterBand(1)
     proj = osr.SpatialReference(wkt=input_ds.GetProjection())
     dem_nan = raster_band.GetNoDataValue()
 
-    tmp_output_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_shapefile.shp')
+    tmp_output_path = os.path.join(tmp_dir, 'tmp_contours.shp')
     contour_ds = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(tmp_output_path)
     contour_shp = contour_ds.CreateLayer('contour', proj, geom_type=ogr.wkbLineString25D)
     field_def = ogr.FieldDefn("ID", ogr.OFTInteger)
@@ -102,23 +99,23 @@ def generate_contours(clipped_dem_feet_data, tmp_dir, kml_name, interval=1):
     logging.debug("Generated contour data length: %d bytes", len(contour_data))
     return contour_data, tmp_dir
 
-def convert_shapefile_to_dxf(shapefile_data, tmp_dir, kml_name):
-    tmp_input_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_shapefile.shp')
-    tmp_output_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_contours(feet).dxf')
+def convert_shapefile_to_dxf(shapefile_data, tmp_dir):
+    tmp_input_path = os.path.join(tmp_dir, 'tmp_contours.shp')
+    tmp_output_path = os.path.join(tmp_dir, 'tmp_contours.dxf')
     subprocess.run(['ogr2ogr', '-f', 'DXF', '-zfield', 'elev', tmp_output_path, tmp_input_path], check=True)
     with open(tmp_output_path, 'rb') as f:
         dxf_data = f.read()
     logging.debug("Converted DXF data length: %d bytes", len(dxf_data))
     return dxf_data, tmp_dir
 
-def raster_to_points(clipped_dem_data, tmp_dir, kml_name):
-    tmp_input_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_clipped_dem.tif')
+def raster_to_points(clipped_dem_data, tmp_dir):
+    tmp_input_path = os.path.join(tmp_dir, 'tmp_clip.tif')
     input_ds = gdal.Open(tmp_input_path, gdal.GA_Update)
     band = input_ds.GetRasterBand(1)
     nodata = band.GetNoDataValue()
     gt = input_ds.GetGeoTransform()
 
-    tmp_output_path = os.path.join(tmp_dir, f'{get_first_word(kml_name)}_pvsyst_input(meters).csv')
+    tmp_output_path = os.path.join(tmp_dir, 'tmp_points.csv')
     with open(tmp_output_path, 'w', newline='') as tmp_output:
         tmp_output.write("X,Y,Z\n")
         for y in range(band.YSize):
@@ -225,48 +222,50 @@ def upload():
     # Process the uploaded files
     try:
         clipped_dem_data, tmp_dir = clip_raster(dem_path, kml_path)
-        clipped_dem_feet_data, tmp_dir = transform_to_feet(clipped_dem_data, tmp_dir, kml_file.filename)
-        contour_shp_data, tmp_dir = generate_contours(clipped_dem_feet_data, tmp_dir, kml_file.filename)
-        dxf_data, tmp_dir = convert_shapefile_to_dxf(contour_shp_data, tmp_dir, kml_file.filename)
-        points_data, csv_path, tmp_dir = raster_to_points(clipped_dem_data, tmp_dir, kml_file.filename)
+        clipped_dem_feet_data, tmp_dir = transform_to_feet(clipped_dem_data, tmp_dir)
+        contour_shp_data, tmp_dir = generate_contours(clipped_dem_feet_data, tmp_dir)
+        dxf_data, tmp_dir = convert_shapefile_to_dxf(contour_shp_data, tmp_dir)
+        points_data, points_csv_path, tmp_dir = raster_to_points(clipped_dem_data, tmp_dir)
 
-        points_meters, points_feet = read_csv(csv_path)
-        dxf_meters_path = os.path.join(tmp_dir, f"{get_first_word(kml_file.filename)}_3D_points(meters).dxf")
-        dxf_feet_path = os.path.join(tmp_dir, f"{get_first_word(kml_file.filename)}_3D_points(feet).dxf")
-        dxf_feet_mesh_path = os.path.join(tmp_dir, f"{get_first_word(kml_file.filename)}_Generated_Mesh(feet).dxf")
+        # Generate 3D points DXF in meters and feet
+        points_meters, points_feet = read_csv(points_csv_path)
+        dxf_file_meters = os.path.join(tmp_dir, 'output_meters.dxf')
+        dxf_file_feet = os.path.join(tmp_dir, 'output_feet.dxf')
+        create_dxf(points_meters, dxf_file_meters)
+        create_dxf(points_feet, dxf_file_feet)
 
-        create_dxf(points_meters, dxf_meters_path)
-        create_dxf(points_feet, dxf_feet_path)
+        # Generate 3D mesh DXF in feet
         simplices = create_mesh(points_feet)
-        create_dxf_mesh(points_feet, simplices, dxf_feet_mesh_path)
+        dxf_file_feet_mesh = os.path.join(tmp_dir, 'output_feet_mesh.dxf')
+        create_dxf_mesh(points_feet, simplices, dxf_file_feet_mesh)
 
-        # Read the generated DXF files for zipping
-        with open(dxf_meters_path, 'rb') as f:
+        # Read generated DXF files
+        with open(dxf_file_meters, 'rb') as f:
             dxf_meters_data = f.read()
-        with open(dxf_feet_path, 'rb') as f:
+        with open(dxf_file_feet, 'rb') as f:
             dxf_feet_data = f.read()
-        with open(dxf_feet_mesh_path, 'rb') as f:
+        with open(dxf_file_feet_mesh, 'rb') as f:
             dxf_feet_mesh_data = f.read()
 
         # Create an in-memory zip file
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w') as zipf:
             logging.debug("Adding clipped_dem.tif to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_clipped_dem.tif", clipped_dem_data)
+            zipf.writestr("clipped_dem.tif", clipped_dem_data)
             logging.debug("Adding clipped_dem_feet.tif to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_clipped_dem(feet).tif", clipped_dem_feet_data)
+            zipf.writestr("clipped_dem_feet.tif", clipped_dem_feet_data)
             logging.debug("Adding contours-shape-file.shp to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_shapefile.shp", contour_shp_data)
+            zipf.writestr("contours-shape-file.shp", contour_shp_data)
             logging.debug("Adding contours.dxf to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_contours(feet).dxf", dxf_data)
+            zipf.writestr("contours.dxf", dxf_data)
             logging.debug("Adding pvsyst_shading_file.csv to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_pvsyst_input(meters).csv", points_data)
+            zipf.writestr("pvsyst_shading_file.csv", points_data)
             logging.debug("Adding output_meters.dxf to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_3D_points(meters).dxf", dxf_meters_data)
+            zipf.writestr("output_meters.dxf", dxf_meters_data)
             logging.debug("Adding output_feet.dxf to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_3D_points(feet).dxf", dxf_feet_data)
+            zipf.writestr("output_feet.dxf", dxf_feet_data)
             logging.debug("Adding output_feet_mesh.dxf to zip")
-            zipf.writestr(f"{get_first_word(kml_file.filename)}_Generated_Mesh(feet).dxf", dxf_feet_mesh_data)
+            zipf.writestr("output_feet_mesh.dxf", dxf_feet_mesh_data)
         zip_buffer.seek(0)
 
         # Clean up temporary files
