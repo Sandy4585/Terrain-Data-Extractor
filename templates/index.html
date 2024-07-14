@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Terrain Data Generator</title>
+    <title>TerrainXact</title>
     <link href="https://fonts.googleapis.com/css2?family=Avenir+Next+LT+Pro:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -17,14 +17,23 @@
             height: 100vh;
             background-color: #f0f8ff; /* Light blue background */
         }
-        .header {
+        .navbar {
             background-color: #00B0F0; /* Blue background */
-            padding: 10px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: bold;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             color: white; /* White text */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            position: relative; /* To position the title absolutely */
+        }
+        .title {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 30px;
+            margin: 0;
+            color: whitesmoke;
         }
         .container {
             max-width: 600px;
@@ -41,18 +50,23 @@
             color: #00B0F0; /* Blue text */
         }
         form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
             background-color: rgba(255, 255, 255, 0.9); /* Semi-transparent white background */
             padding: 20px;
             border-radius: 10px;
         }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
         label {
-            display: block;
-            margin-bottom: 10px;
             color: #000000; /* Black text */
             font-weight: bold;
         }
         input[type=file] {
-            margin-bottom: 15px;
             padding: 10px;
             border: 1px solid #cccccc; /* Light gray border */
             border-radius: 5px;
@@ -126,7 +140,7 @@
         .slideshow img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: 90%;
             position: absolute;
             opacity: 0;
             transition: opacity 1s ease-in-out;
@@ -139,24 +153,32 @@
 <body>
     <div class="slideshow">
         <img src="{{ url_for('static', filename='images/Background image.jpg') }}" class="active">
+        <img src="{{ url_for('static', filename='images/ai-1.png') }}">
+        <img src="{{ url_for('static', filename='images/tea-2.png') }}">
         <img src="{{ url_for('static', filename='images/final-image.png') }}">
         <img src="{{ url_for('static', filename='images/solarpanels.jpg') }}">
+        <img src="{{ url_for('static', filename='images/tea.png') }}">
         <img src="{{ url_for('static', filename='images/terrain_background.png') }}">
     </div>
-    <div class="header">
-        Terrain Data Generator
+    <div class="navbar">
+        <h1 class="title">TerrainXact</h1>
+        <div class="logo">
+            <img src="{{ url_for('static', filename='images/CIR.jpg') }}" alt="CIR Logo">
+        </div>
     </div>
     <div class="container">
         <h1>Upload Your Files</h1>
         <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
-            <label for="dem_file">Upload DEM (Raster) File:</label>
-            <input type="file" id="dem_file" name="dem_file" accept=".tif,.tiff">
-            <span class="file-success" id="dem_file_success"></span><br>
-            
-            <label for="kml_file">Upload KML File:</label>
-            <input type="file" id="kml_file" name="kml_file" accept=".kml">
-            <span class="file-success" id="kml_file_success"></span><br>
-
+            <div class="form-group">
+                <label for="dem_file">Upload DEM (Raster) File:</label>
+                <input type="file" id="dem_file" name="dem_file" accept=".tif,.tiff">
+                <span class="file-success" id="dem_file_success"></span>
+            </div>
+            <div class="form-group">
+                <label for="kml_file">Upload KML File:</label>
+                <input type="file" id="kml_file" name="kml_file" accept=".kml">
+                <span class="file-success" id="kml_file_success"></span>
+            </div>
             <button type="submit">Process Files</button>
         </form>
         <div class="progress">
@@ -165,10 +187,7 @@
         <div class="message" id="message"></div>
     </div>
     <div class="footer">
-        &copy; 2024 Terrain Data Generator. All rights reserved.
-    </div>
-    <div class="logo">
-        <img src="{{ url_for('static', filename='images/CIR.jpg') }}" alt="CIR Logo">
+        &copy; 2024 TerrainXact. All rights reserved.
     </div>
     <script>
         document.getElementById('dem_file').addEventListener('change', function() {
